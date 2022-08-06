@@ -19,7 +19,8 @@ import os
 from os.path import join
 from Make_model import make_model
 from torch.utils.tensorboard import SummaryWriter
-#*************************************************************************#
+
+
 Mode = 'train'
 DEBUG = 'False'
 DATASET = 'PEMSD4'      #PEMSD4 or PEMSD8
@@ -51,7 +52,6 @@ args.add_argument('--model', default=MODEL, type=str)
 args.add_argument('--cuda', default=True, type=bool)
 args.add_argument('--comment', default='', type=str)
 
-
 #data
 args.add_argument('--val_ratio', default=config['data']['val_ratio'], type=float)
 args.add_argument('--test_ratio', default=config['data']['test_ratio'], type=float)
@@ -62,6 +62,8 @@ args.add_argument('--tod', default=config['data']['tod'], type=eval)
 args.add_argument('--normalizer', default=config['data']['normalizer'], type=str)
 args.add_argument('--column_wise', default=config['data']['column_wise'], type=eval)
 args.add_argument('--default_graph', default=config['data']['default_graph'], type=eval)
+args.add_argument('--data_category', default=config['data']['data_category'], type=str)
+
 #model
 args.add_argument('--model_type', default=config['model']['type'], type=str)
 args.add_argument('--g_type', default=config['model']['g_type'], type=str)
@@ -91,7 +93,6 @@ args.add_argument('--max_grad_norm', default=config['train']['max_grad_norm'], t
 args.add_argument('--teacher_forcing', default=False, type=bool)
 #args.add_argument('--tf_decay_steps', default=2000, type=int, help='teacher forcing decay steps')
 args.add_argument('--real_value', default=config['train']['real_value'], type=eval, help = 'use real value for loss calculation')
-
 args.add_argument('--missing_test', default=False, type=bool)
 args.add_argument('--missing_rate', default=0.1, type=float)
 
@@ -99,6 +100,7 @@ args.add_argument('--missing_rate', default=0.1, type=float)
 args.add_argument('--mae_thresh', default=config['test']['mae_thresh'], type=eval)
 args.add_argument('--mape_thresh', default=config['test']['mape_thresh'], type=float)
 args.add_argument('--model_path', default='', type=str)
+
 #log
 args.add_argument('--log_dir', default='../runs', type=str)
 args.add_argument('--log_step', default=config['log']['log_step'], type=int)
