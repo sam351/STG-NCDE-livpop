@@ -151,15 +151,18 @@ def get_dataloader_cde(args, normalizer = 'std', tod=False, dow=False, weather=F
         x_tra = xs[:x_tra.shape[0],...] 
         x_val = xs[x_tra.shape[0]:x_tra.shape[0]+x_val.shape[0],...]
         x_test = xs[-x_test.shape[0]:,...] 
-    ####
-    # TODO: make argument for data category
-    data_category = 'traffic'
+    
+    #
+    data_category = args.data_category
     if data_category == 'traffic':
         times = torch.linspace(0, 11, 12)
     elif data_category == 'token':
         times = torch.linspace(0, 6, 7)
+    elif data_category == 'livpop':
+        times = torch.linspace(0, x_tra.shape[1]-1, x_tra.shape[1])
     else:
         raise ValueError
+    
     augmented_X_tra = []
     augmented_X_tra.append(times.unsqueeze(0).unsqueeze(0).repeat(x_tra.shape[0],x_tra.shape[2],1).unsqueeze(-1).transpose(1,2))
     augmented_X_tra.append(torch.Tensor(x_tra[..., :]))
@@ -173,26 +176,23 @@ def get_dataloader_cde(args, normalizer = 'std', tod=False, dow=False, weather=F
     augmented_X_test.append(torch.Tensor(x_test[..., :]))
     x_test = torch.cat(augmented_X_test, dim=3)
 
-    ####
-    # train_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, torch.Tensor(x_tra).transpose(1,2))
-    # valid_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, torch.Tensor(x_val).transpose(1,2))
-    # test_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, torch.Tensor(x_test).transpose(1,2))
+    ###
     train_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, x_tra.transpose(1,2))
     valid_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, x_val.transpose(1,2))
     test_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, x_test.transpose(1,2))
     # train_coeffs = tuple(coeff.transpose(1,2) for coeff in train_coeffs)
     # valid_coeffs = tuple(coeff.transpose(1,2) for coeff in valid_coeffs)
     # test_coeffs = tuple(coeff.transpose(1,2) for coeff in test_coeffs)
-    ##############get dataloader######################
+
+    #get dataloader
     train_dataloader = data_loader_cde(train_coeffs, y_tra, args.batch_size, shuffle=True, drop_last=True)
 
     if len(x_val) == 0:
         val_dataloader = None
     else:
         val_dataloader = data_loader_cde(valid_coeffs, y_val, args.batch_size, shuffle=False, drop_last=True)
-        # val_dataloader = data_loader(x_val, y_val, args.batch_size, shuffle=False, drop_last=True)
-    # test_dataloader = data_loader(x_test, y_test, args.batch_size, shuffle=False, drop_last=False)
     test_dataloader = data_loader_cde(test_coeffs, y_test, args.batch_size, shuffle=False, drop_last=False)
+
     return train_dataloader, val_dataloader, test_dataloader, scaler, times
 
 if __name__ == '__main__':
