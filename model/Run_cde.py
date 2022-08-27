@@ -112,7 +112,8 @@ init_seed(args.seed)
 
 GPU_NUM = args.device
 device = torch.device(f'cuda:{GPU_NUM}' if torch.cuda.is_available() else 'cpu')
-torch.cuda.set_device(device) # change allocation of current GPU
+# torch.cuda.set_device(device) # change allocation of current GPU
+args.device = args.device if torch.cuda.is_available() else 'cpu'
 
 print(args)
 
