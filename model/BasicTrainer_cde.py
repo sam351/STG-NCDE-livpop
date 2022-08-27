@@ -118,7 +118,7 @@ class Trainer(object):
         return train_epoch_loss
 
     def train(self):
-        best_model = None
+        # best_model = None
         best_loss = float('inf')
         not_improved_count = 0
         train_loss_list = []
@@ -158,8 +158,9 @@ class Trainer(object):
                     break
             # save the best state
             if best_state == True:
+                self.save_checkpoint()
                 self.logger.info('*********************************Current best model saved!')
-                best_model = copy.deepcopy(self.model.state_dict())
+                # best_model = copy.deepcopy(self.model.state_dict())
             
             # if epoch%10==0:#test
             #     self.model.load_state_dict(best_model)
@@ -169,17 +170,20 @@ class Trainer(object):
         training_time = time.time() - start_time
         self.logger.info("Total training time: {:.4f}min, best loss: {:.6f}".format((training_time / 60), best_loss))
 
-        #save the best model to file
-        if not self.args.debug:
-            torch.save(best_model, self.best_path)
-            self.logger.info("Saving current best model to " + self.best_path)
+        # # save the best model to file
+        # if not self.args.debug:
+        #     torch.save(best_model, self.best_path)
+        #     self.logger.info("Saving current best model to " + self.best_path)
 
         # if epoch==10:#test
         #     self.model.load_state_dict(best_model)
         #     #self.val_epoch(self.args.epochs, self.test_loader)
         #     self.test(self.model, self.args, self.test_loader, self.scaler, self.logger, None, self.times)
+        # self.model.load_state_dict(best_model)
+        # self.val_epoch(self.args.epochs, self.test_loader)
+        
+        best_model = torch.load(self.best_path)['state_dict']
         self.model.load_state_dict(best_model)
-        #self.val_epoch(self.args.epochs, self.test_loader)
         self.test(self.model, self.args, self.test_loader, self.scaler, self.logger, None, self.times)
 
     def save_checkpoint(self):
