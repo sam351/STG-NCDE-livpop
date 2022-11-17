@@ -1,7 +1,18 @@
+if __name__ == '__main__':
+    import time
+    st_time = time.time()
+
+    import os
+    import sys
+    file_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.append(file_dir)
+    print(file_dir)
+
+
 import torch
 import numpy as np
 import torch.utils.data
-from lib.add_window import Add_Window_Horizon
+from lib.add_window import Add_Window_Horizon, Add_Window_Horizon_Weekly
 from lib.load_dataset import load_st_dataset
 from lib.normalization import NScaler, MinMax01Scaler, MinMax11Scaler, StandardScaler, ColumnMinMaxScaler
 import controldiffeq
@@ -195,25 +206,104 @@ def get_dataloader_cde(args, normalizer = 'std', tod=False, dow=False, weather=F
 
     return train_dataloader, val_dataloader, test_dataloader, scaler, times
 
+
+def get_dataloader_cde_v2(args, normalizer = 'std', single=False, day_size=24, verbose=False):
+    #load raw st dataset
+    data = load_st_dataset(args.dataset)        # B, N, D
+    if verbose:
+        print(f'\n>>> Load {args.dataset} Dataset shaped: {data.shape}')
+    
+    #normalize st data
+    data, scaler = normalize_dataset(data, normalizer, args.column_wise)
+    if verbose:
+        print(f'\n>>> After normalization shaped:', data.shape)
+    
+    #spilit dataset by days or by ratio
+    if args.test_ratio > 1:
+        data_train, data_val, data_test = split_data_by_days(data, args.val_ratio, args.test_ratio)
+    else:
+        data_train, data_val, data_test = split_data_by_ratio(data, args.val_ratio, args.test_ratio)
+    if verbose:
+        print(f'\n>>> After split:')
+        print(f'train.shape:{data_train.shape} & data_val.shape:{data_val.shape} & data_test.shape:{data_test.shape}')    
+
+    #add time window
+    data_category = args.data_category
+    if data_category == 'livpop':
+        x_tra, y_tra = Add_Window_Horizon_Weekly(data_train, args.lag, args.horizon, day_size)
+        x_val, y_val = Add_Window_Horizon_Weekly(data_val, args.lag, args.horizon, day_size)
+        x_test, y_test = Add_Window_Horizon_Weekly(data_test, args.lag, args.horizon, day_size)
+    else:
+        x_tra, y_tra = Add_Window_Horizon(data_train, args.lag, args.horizon, single)
+        x_val, y_val = Add_Window_Horizon(data_val, args.lag, args.horizon, single)
+        x_test, y_test = Add_Window_Horizon(data_test, args.lag, args.horizon, single)
+    if verbose:
+        print(f'\n>>> After window split:')
+    print('Train: ', x_tra.shape, y_tra.shape)
+    print('Val: ', x_val.shape, y_val.shape)
+    print('Test: ', x_test.shape, y_test.shape)
+    
+    #
+    if data_category == 'traffic':
+        times = torch.linspace(0, 11, 12)
+    elif data_category == 'token':
+        times = torch.linspace(0, 6, 7)
+    elif data_category == 'livpop':
+        times = torch.linspace(0, x_tra.shape[1]-1, x_tra.shape[1])
+    else:
+        raise ValueError
+    
+    augmented_X_tra = []
+    augmented_X_tra.append(times.unsqueeze(0).unsqueeze(0).repeat(x_tra.shape[0],x_tra.shape[2],1).unsqueeze(-1).transpose(1,2))
+    augmented_X_tra.append(torch.Tensor(x_tra[..., :]))
+    x_tra = torch.cat(augmented_X_tra, dim=3)
+    augmented_X_val = []
+    augmented_X_val.append(times.unsqueeze(0).unsqueeze(0).repeat(x_val.shape[0],x_val.shape[2],1).unsqueeze(-1).transpose(1,2))
+    augmented_X_val.append(torch.Tensor(x_val[..., :]))
+    x_val = torch.cat(augmented_X_val, dim=3)
+    augmented_X_test = []
+    augmented_X_test.append(times.unsqueeze(0).unsqueeze(0).repeat(x_test.shape[0],x_test.shape[2],1).unsqueeze(-1).transpose(1,2))
+    augmented_X_test.append(torch.Tensor(x_test[..., :]))
+    x_test = torch.cat(augmented_X_test, dim=3)
+
+    ###
+    train_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, x_tra.transpose(1,2))
+    valid_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, x_val.transpose(1,2))
+    test_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, x_test.transpose(1,2))
+
+    #get dataloader
+    train_dataloader = data_loader_cde(train_coeffs, y_tra, args.batch_size, shuffle=True, drop_last=True)
+
+    if len(x_val) == 0:
+        val_dataloader = None
+    else:
+        val_dataloader = data_loader_cde(valid_coeffs, y_val, args.batch_size, shuffle=False, drop_last=True)
+    test_dataloader = data_loader_cde(test_coeffs, y_test, args.batch_size, shuffle=False, drop_last=False)
+
+    return train_dataloader, val_dataloader, test_dataloader, scaler, times
+
+
 if __name__ == '__main__':
     import argparse
-    #MetrLA 207; BikeNYC 128; SIGIR_solar 137; SIGIR_electric 321
-    DATASET = 'SIGIR_electric'
-    if DATASET == 'MetrLA':
-        NODE_NUM = 207
-    elif DATASET == 'BikeNYC':
-        NODE_NUM = 128
-    elif DATASET == 'SIGIR_solar':
-        NODE_NUM = 137
-    elif DATASET == 'SIGIR_electric':
-        NODE_NUM = 321
+    
     parser = argparse.ArgumentParser(description='PyTorch dataloader')
-    parser.add_argument('--dataset', default=DATASET, type=str)
-    parser.add_argument('--num_nodes', default=NODE_NUM, type=int)
-    parser.add_argument('--val_ratio', default=0.1, type=float)
+    parser.add_argument('--dataset', default='LIVPOP', type=str)
+    # parser.add_argument('--num_nodes', default=1000, type=int)  # #MetrLA 207; BikeNYC 128; SIGIR_solar 137; SIGIR_electric 321
+    parser.add_argument('--val_ratio', default=0.2, type=float)
     parser.add_argument('--test_ratio', default=0.2, type=float)
-    parser.add_argument('--lag', default=12, type=int)
-    parser.add_argument('--horizon', default=12, type=int)
+    parser.add_argument('--lag', default=3, type=int)
+    parser.add_argument('--horizon', default=1, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
+    parser.add_argument('--column_wise', default=False, type=eval)
+    parser.add_argument('--missing_test', default=False, type=bool)
+    parser.add_argument('--data_category', default='livpop', type=str)
     args = parser.parse_args()
-    train_dataloader, val_dataloader, test_dataloader, scaler = get_dataloader(args, normalizer = 'std', tod=False, dow=False, weather=False, single=True)
+    print(args)
+    
+    train_dataloader, val_dataloader, test_dataloader, scaler, times = get_dataloader_cde_v2(args, normalizer='std', single=False, verbose=True)
+    print('\n>>> train_dataloader:', len(train_dataloader), train_dataloader.__class__)
+    print('>>> val_dataloader:', len(val_dataloader), val_dataloader.__class__)
+    print('>>> test_dataloader:', len(test_dataloader), test_dataloader.__class__)
+    print('>>> scaler:', scaler.__class__)
+    print('>>> times:', times)
+    print(f'\n>>> Time Elapsed : {time.time()-st_time:.1f} s.')
