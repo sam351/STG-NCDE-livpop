@@ -13,24 +13,13 @@ import time
 
 from model.BasicTrainer_cde import Trainer
 from lib.TrainInits import init_seed
-from lib.dataloader import get_dataloader_cde
+from lib.dataloader import get_dataloader_cde, get_dataloader_cde_v2
 from lib.TrainInits import print_model_parameters
 import os
 from os.path import join
 from Make_model import make_model
 from torch.utils.tensorboard import SummaryWriter
 
-
-Mode = 'train'
-DEBUG = 'False'
-DATASET = 'PEMSD4'      #PEMSD4 or PEMSD8
-MODEL = 'GCDE'
-
-#get configuration
-config_file = './{}_{}.conf'.format(DATASET, MODEL)
-#print('Read configuration file: %s' % (config_file))
-config = configparser.ConfigParser()
-config.read(config_file)
 
 from lib.metrics import MAE_torch
 def masked_mae_loss(scaler, mask_value):
@@ -42,13 +31,23 @@ def masked_mae_loss(scaler, mask_value):
         return mae
     return loss
 
+
 #parser
 args = argparse.ArgumentParser(description='arguments')
-args.add_argument('--dataset', default=DATASET, type=str)
-args.add_argument('--mode', default=Mode, type=str)
+args.add_argument('--dataset', default='LIVPOP', type=str)
+args.add_argument('--model', default='GCDE', type=str)
+
+#get configuration
+dataset_nm = args.parse_known_args()[0].dataset
+model_nm = args.parse_known_args()[0].model
+config_file = f'./{dataset_nm}_{model_nm}.conf'
+#print('Read configuration file: %s' % (config_file))
+config = configparser.ConfigParser()
+config.read(config_file)
+
+args.add_argument('--mode', default='train', type=str)
 args.add_argument('--device', default=0, type=int, help='indices of GPUs')
-args.add_argument('--debug', default=DEBUG, type=eval)
-args.add_argument('--model', default=MODEL, type=str)
+args.add_argument('--debug', default='False', type=eval)
 args.add_argument('--cuda', default=True, type=bool)
 args.add_argument('--comment', default='', type=str)
 
@@ -119,13 +118,11 @@ print(args)
 
 #config log path
 save_name = time.strftime("%m-%d-%Hh%Mm")+args.comment+"_"+ args.dataset+"_"+ args.model+"_"+ args.model_type+"_"+"embed{"+str(args.embed_dim)+"}"+"hid{"+str(args.hid_dim)+"}"+"hidhid{"+str(args.hid_hid_dim)+"}"+"lyrs{"+str(args.num_layers)+"}"+"lr{"+str(args.lr_init)+"}"+"wd{"+str(args.weight_decay)+"}"
-path = '../runs'
-
-log_dir = join(path, args.dataset, save_name)
-args.log_dir = log_dir
+args.log_dir = join(args.log_dir, args.dataset, save_name)
 if (os.path.exists(args.log_dir)):
-        print('has model save path')
+    print('>>> model save path already exists')
 else:
+    print('>>> creating model save path')
     os.makedirs(args.log_dir)
 
 if args.tensorboard:
@@ -165,10 +162,12 @@ for p in model.parameters():
 print_model_parameters(model, only_num=False)
 
 #load dataset
-train_loader, val_loader, test_loader, scaler, times = get_dataloader_cde(args,
-                                                               normalizer=args.normalizer,
-                                                               tod=args.tod, dow=False,
-                                                               weather=False, single=False)
+if args.data_category == 'livpop':
+    train_loader, val_loader, test_loader, scaler, times = get_dataloader_cde_v2(args, normalizer=args.normalizer)
+else:
+    train_loader, val_loader, test_loader, scaler, times = get_dataloader_cde(args, normalizer=args.normalizer,
+                                                                              tod=args.tod, dow=False,
+                                                                              weather=False, single=False)
 
 #init loss function, optimizer
 if args.loss_func == 'mask_mae':
@@ -195,9 +194,11 @@ if args.lr_decay:
                                                         gamma=args.lr_decay_rate)
 
 #start training
-trainer = Trainer(model, vector_field_f, vector_field_g, loss, optimizer, train_loader, val_loader, test_loader, scaler,
-                  args, lr_scheduler, args.device, times,
-                  w)
+trainer = Trainer(
+    model, vector_field_f, vector_field_g, loss, optimizer, 
+    train_loader, val_loader, test_loader, scaler,
+    args, lr_scheduler, args.device, times, w
+)
 if args.mode == 'train':
     trainer.train()
 elif args.mode == 'test':
