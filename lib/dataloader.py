@@ -218,32 +218,30 @@ def get_dataloader_cde_v2(args, normalizer = 'std', single=False, day_size=24, v
     if verbose:
         print(f'\n>>> After normalization shaped:', data.shape)
     
-    #spilit dataset by days or by ratio
-    if args.test_ratio > 1:
-        data_train, data_val, data_test = split_data_by_days(data, args.val_ratio, args.test_ratio)
-    else:
-        data_train, data_val, data_test = split_data_by_ratio(data, args.val_ratio, args.test_ratio)
-    if verbose:
-        print(f'\n>>> After split:')
-        print(f'train.shape:{data_train.shape} & data_val.shape:{data_val.shape} & data_test.shape:{data_test.shape}')    
-
     #add time window
     data_category = args.data_category
     if data_category == 'livpop':
-        x_tra, y_tra = Add_Window_Horizon_Weekly(data_train, args.lag, args.horizon, day_size)
-        x_val, y_val = Add_Window_Horizon_Weekly(data_val, args.lag, args.horizon, day_size)
-        x_test, y_test = Add_Window_Horizon_Weekly(data_test, args.lag, args.horizon, day_size)
+        x_data, y_data = Add_Window_Horizon_Weekly(data, args.lag, args.horizon, day_size)
     else:
-        x_tra, y_tra = Add_Window_Horizon(data_train, args.lag, args.horizon, single)
-        x_val, y_val = Add_Window_Horizon(data_val, args.lag, args.horizon, single)
-        x_test, y_test = Add_Window_Horizon(data_test, args.lag, args.horizon, single)
+        x_data, y_data = Add_Window_Horizon(data_train, args.lag, args.horizon, single)
     if verbose:
         print(f'\n>>> After window split:')
+        print(x_data.shape, y_data.shape)
+    
+    #spilit dataset by days or by ratio
+    if args.test_ratio > 1:
+        x_tra, x_val, x_test = split_data_by_days(x_data, args.val_ratio, args.test_ratio)
+        y_tra, y_val, y_test = split_data_by_days(y_data, args.val_ratio, args.test_ratio)
+    else:
+        x_tra, x_val, x_test = split_data_by_ratio(x_data, args.val_ratio, args.test_ratio)
+        y_tra, y_val, y_test = split_data_by_ratio(y_data, args.val_ratio, args.test_ratio)
+    if verbose:
+        print(f'\n>>> After split:')
     print('Train: ', x_tra.shape, y_tra.shape)
     print('Val: ', x_val.shape, y_val.shape)
     print('Test: ', x_test.shape, y_test.shape)
     
-    #
+    #add row id
     if data_category == 'traffic':
         times = torch.linspace(0, 11, 12)
     elif data_category == 'token':
@@ -252,7 +250,6 @@ def get_dataloader_cde_v2(args, normalizer = 'std', single=False, day_size=24, v
         times = torch.linspace(0, x_tra.shape[1]-1, x_tra.shape[1])
     else:
         raise ValueError
-    
     augmented_X_tra = []
     augmented_X_tra.append(times.unsqueeze(0).unsqueeze(0).repeat(x_tra.shape[0],x_tra.shape[2],1).unsqueeze(-1).transpose(1,2))
     augmented_X_tra.append(torch.Tensor(x_tra[..., :]))
@@ -266,14 +263,13 @@ def get_dataloader_cde_v2(args, normalizer = 'std', single=False, day_size=24, v
     augmented_X_test.append(torch.Tensor(x_test[..., :]))
     x_test = torch.cat(augmented_X_test, dim=3)
 
-    ###
+    #get coeffs
     train_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, x_tra.transpose(1,2))
     valid_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, x_val.transpose(1,2))
     test_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, x_test.transpose(1,2))
 
     #get dataloader
     train_dataloader = data_loader_cde(train_coeffs, y_tra, args.batch_size, shuffle=True, drop_last=True)
-
     if len(x_val) == 0:
         val_dataloader = None
     else:
