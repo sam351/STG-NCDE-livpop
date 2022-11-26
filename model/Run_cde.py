@@ -162,12 +162,14 @@ for p in model.parameters():
 print_model_parameters(model, only_num=False)
 
 #load dataset
+print('\n>>> Start getting dataloader...')
 if args.data_category == 'livpop':
     train_loader, val_loader, test_loader, scaler, times = \
         get_dataloader_cde_v2(args, normalizer=args.normalizer, day_size=8)
 else:
     train_loader, val_loader, test_loader, scaler, times = \
         get_dataloader_cde(args, normalizer=args.normalizer, tod=args.tod, dow=False, weather=False, single=False)
+print('>>> Finished getting dataloader!\n')
 
 #init loss function, optimizer
 if args.loss_func == 'mask_mae':
