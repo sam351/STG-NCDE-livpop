@@ -36,5 +36,21 @@ def load_st_dataset(dataset):
     if len(data.shape) == 2:
         data = np.expand_dims(data, axis=-1)
     print(f'Load {dataset} Dataset shaped: {data.shape}')
-    print(f'min: {data.min()}  &  max: {data.max(), }  &  mean: {data.mean()}  &  median: {np.median(data)}')
+    print(f'min: {data.min():.4f}  &  max: {data.max():.4f}  &  median: {np.median(data):.4f}')
+    print(f'mean: {data.mean()}')
+    print(f'std: {data.std()}')
+    print()
     return data
+
+
+if __name__ == '__main__':
+    import argparse
+    
+    # argument parser
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', default='LIVPOP', type=str)
+    args = parser.parse_args()
+    print(args)
+    
+    # test loading dataset
+    data = load_st_dataset(args.dataset)
