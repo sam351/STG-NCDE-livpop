@@ -17,9 +17,12 @@ from lib.load_dataset import load_st_dataset
 from lib.normalization import NScaler, MinMax01Scaler, MinMax11Scaler, StandardScaler, ColumnMinMaxScaler
 import controldiffeq
 
-def normalize_dataset(data, normalizer, column_wise=False):
+
+def normalize_dataset(data, normalizer, column_wise=False, stats=None):
     if normalizer == 'max01':
-        if column_wise:
+        if stats is not None:
+            minimum, maximum = stats
+        elif column_wise:
             minimum = data.min(axis=0, keepdims=True)
             maximum = data.max(axis=0, keepdims=True)
         else:
@@ -29,7 +32,9 @@ def normalize_dataset(data, normalizer, column_wise=False):
         data = scaler.transform(data)
         print('Normalize the dataset by MinMax01 Normalization')
     elif normalizer == 'max11':
-        if column_wise:
+        if stats is not None:
+            minimum, maximum = stats
+        elif column_wise:
             minimum = data.min(axis=0, keepdims=True)
             maximum = data.max(axis=0, keepdims=True)
         else:
@@ -39,7 +44,9 @@ def normalize_dataset(data, normalizer, column_wise=False):
         data = scaler.transform(data)
         print('Normalize the dataset by MinMax11 Normalization')
     elif normalizer == 'std':
-        if column_wise:
+        if stats is not None:
+            mean, std = stats
+        elif column_wise:
             mean = data.mean(axis=0, keepdims=True)
             std = data.std(axis=0, keepdims=True)
         else:
@@ -48,6 +55,8 @@ def normalize_dataset(data, normalizer, column_wise=False):
         scaler = StandardScaler(mean, std)
         data = scaler.transform(data)
         print('Normalize the dataset by Standard Normalization')
+        print(f'mean({mean:.2f})')
+        print(f'std({std:.2f})\n')
     elif normalizer == 'None':
         scaler = NScaler()
         data = scaler.transform(data)
@@ -55,12 +64,17 @@ def normalize_dataset(data, normalizer, column_wise=False):
     elif normalizer == 'cmax':
         #column min max, to be depressed
         #note: axis must be the spatial dimension, please check !
-        scaler = ColumnMinMaxScaler(data.min(axis=0), data.max(axis=0))
+        if stats is not None:
+            minimum, maximum = stats
+        else:
+            minimum, maximum = data.min(axis=0), data.max(axis=0)
+        scaler = ColumnMinMaxScaler(minimum, maximum)
         data = scaler.transform(data)
         print('Normalize the dataset by Column Min-Max Normalization')
     else:
         raise ValueError
     return data, scaler
+
 
 def split_data_by_days(data, val_days, test_days, interval=60):
     '''
@@ -76,12 +90,14 @@ def split_data_by_days(data, val_days, test_days, interval=60):
     train_data = data[:-T*(test_days + val_days)]
     return train_data, val_data, test_data
 
+
 def split_data_by_ratio(data, val_ratio, test_ratio):
     data_len = data.shape[0]
     test_data = data[-int(data_len*test_ratio):]
     val_data = data[-int(data_len*(test_ratio+val_ratio)):-int(data_len*test_ratio)]
     train_data = data[:-int(data_len*(test_ratio+val_ratio))]
     return train_data, val_data, test_data
+
 
 def data_loader(X, Y, batch_size, shuffle=True, drop_last=True):
     cuda = True if torch.cuda.is_available() else False
@@ -92,6 +108,7 @@ def data_loader(X, Y, batch_size, shuffle=True, drop_last=True):
                                              shuffle=shuffle, drop_last=drop_last)
     return dataloader
 
+
 def data_loader_cde(X, Y, batch_size, shuffle=True, drop_last=True):
     cuda = True if torch.cuda.is_available() else False
     TensorFloat = torch.cuda.FloatTensor if cuda else torch.FloatTensor
@@ -99,6 +116,15 @@ def data_loader_cde(X, Y, batch_size, shuffle=True, drop_last=True):
     # X = tuple(TensorFloat(x) for x in X)
     # Y = TensorFloat(Y)
     data = torch.utils.data.TensorDataset(*X, torch.tensor(Y))
+    dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size,
+                                             shuffle=shuffle, drop_last=drop_last)
+    return dataloader
+
+
+def data_loader_cde_pred(X, batch_size, shuffle=False, drop_last=False):
+    cuda = True if torch.cuda.is_available() else False
+    TensorFloat = torch.cuda.FloatTensor if cuda else torch.FloatTensor
+    data = torch.utils.data.TensorDataset(*X)
     dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size,
                                              shuffle=shuffle, drop_last=drop_last)
     return dataloader
@@ -129,6 +155,7 @@ def get_dataloader(args, normalizer = 'std', tod=False, dow=False, weather=False
         val_dataloader = data_loader(x_val, y_val, args.batch_size, shuffle=False, drop_last=True)
     test_dataloader = data_loader(x_test, y_test, args.batch_size, shuffle=False, drop_last=False)
     return train_dataloader, val_dataloader, test_dataloader, scaler
+
 
 def get_dataloader_cde(args, normalizer = 'std', tod=False, dow=False, weather=False, single=True):
     #load raw st dataset
@@ -223,7 +250,7 @@ def get_dataloader_cde_v2(args, normalizer = 'std', single=False, day_size=24, v
     if data_category == 'livpop':
         x_data, y_data = Add_Window_Horizon_Weekly(data, args.lag, args.horizon, day_size)
     else:
-        x_data, y_data = Add_Window_Horizon(data_train, args.lag, args.horizon, single)
+        x_data, y_data = Add_Window_Horizon(data, args.lag, args.horizon, single)
     if verbose:
         print(f'\n>>> After window split:')
         print(x_data.shape, y_data.shape)
@@ -279,27 +306,105 @@ def get_dataloader_cde_v2(args, normalizer = 'std', single=False, day_size=24, v
     return train_dataloader, val_dataloader, test_dataloader, scaler, times
 
 
+def get_dataloader_cde_pred(args, data_path, normalizer='std', single=False, day_size=24, verbose=False, add_window=True):
+    # load datas
+    if '.npz' in data_path:
+        data = np.load(data_path)['data'][..., 0]  # (T, N) or (B, LAG, N, D)
+    elif '.npy' in data_path:
+        data = np.load(data_path)  # (T, N) or (B, LAG, N, D)
+    else:
+        raise ValueError('data path must be *.npz or .npy')
+    if len(data.shape) == 2:
+        data = np.expand_dims(data, axis=-1)  # (T, N, 1) or (B, LAG, N, D)
+    if verbose:
+        print(f'\n>>> After loading {args.dataset} Dataset shape: {data.shape}')
+    
+    # normalize data
+    data, scaler = normalize_dataset(data, normalizer, args.column_wise, stats=[args.data_mean, args.data_std])
+    if verbose:
+        print(f'\n>>> After normalization shape:', data.shape)
+    
+    # add time window
+    if not add_window:
+        x_data = data
+    elif args.data_category == 'livpop':
+        x_data, _ = Add_Window_Horizon_Weekly(data, args.lag, args.horizon, day_size)
+    else:
+        x_data, _ = Add_Window_Horizon(data, args.lag, args.horizon, single)
+    if verbose:
+        print(f'\n>>> After window split shape:')
+        print(x_data.shape)
+    
+    # add row id
+    if args.data_category == 'traffic':
+        times = torch.linspace(0, 11, 12)
+    elif args.data_category == 'token':
+        times = torch.linspace(0, 6, 7)
+    elif args.data_category == 'livpop':
+        times = torch.linspace(0, x_data.shape[1]-1, x_data.shape[1])
+    else:
+        raise ValueError
+    augmented_x_data = []
+    augmented_x_data.append(times.unsqueeze(0).unsqueeze(0).repeat(x_data.shape[0], x_data.shape[2], 1).unsqueeze(-1).transpose(1, 2))
+    augmented_x_data.append(torch.Tensor(x_data))
+    x_data = torch.cat(augmented_x_data, dim=3)
+    if verbose:
+        print(f'\n>>> After augmentation:')
+        print(x_data.shape)
+
+    # get coeffs
+    data_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, x_data.transpose(1,2))
+    if verbose:
+        print(f'\n>>> After interpolation:')
+        print([i.shape for i in data_coeffs])
+
+    # get dataloader
+    dataloader = data_loader_cde_pred(data_coeffs, args.batch_size, shuffle=False, drop_last=False)
+
+    return dataloader, scaler, times
+
+
 if __name__ == '__main__':
     import argparse
     
+    # argument parser
     parser = argparse.ArgumentParser(description='PyTorch dataloader')
     parser.add_argument('--dataset', default='LIVPOP', type=str)
     # parser.add_argument('--num_nodes', default=1000, type=int)  # #MetrLA 207; BikeNYC 128; SIGIR_solar 137; SIGIR_electric 321
     parser.add_argument('--val_ratio', default=0.2, type=float)
     parser.add_argument('--test_ratio', default=0.2, type=float)
+    parser.add_argument('--tod', default=False, type=eval)
     parser.add_argument('--lag', default=3, type=int)
     parser.add_argument('--horizon', default=1, type=int)
-    parser.add_argument('--batch_size', default=64, type=int)
+    parser.add_argument('--batch_size', default=3, type=int)
     parser.add_argument('--column_wise', default=False, type=eval)
-    parser.add_argument('--missing_test', default=False, type=bool)
+    parser.add_argument('--missing_test', default=False, type=eval)
     parser.add_argument('--data_category', default='livpop', type=str)
+    parser.add_argument('--mode', default='train', type=str)
+    parser.add_argument('--data_path', default='../data/LIVPOP/LIVPOP.npz', type=str)
+    parser.add_argument('--data_mean', default=200, type=float)
+    parser.add_argument('--data_std', default=150, type=float)
     args = parser.parse_args()
     print(args)
     
-    train_dataloader, val_dataloader, test_dataloader, scaler, times = get_dataloader_cde_v2(args, normalizer='std', single=False, verbose=True)
+    # test loading train data
+    print('<<< Testing train data >>>')
+    train_dataloader, val_dataloader, test_dataloader, scaler, times = get_dataloader_cde_v2(args, normalizer='std', single=False, day_size=8, verbose=True)
+    batch = next(iter(train_dataloader))
+    *train_coeffs, target = batch
     print('\n>>> train_dataloader:', len(train_dataloader), train_dataloader.__class__)
-    print('>>> val_dataloader:', len(val_dataloader), val_dataloader.__class__)
-    print('>>> test_dataloader:', len(test_dataloader), test_dataloader.__class__)
+    print(f'    batch: {[tsr.shape for tsr in batch]}')
+    print(f'>>> scaler: mean({scaler.mean:.4f}) & std({scaler.std:.4f})  {scaler.__class__}')
+    print('>>> times:', times.shape)
+    print(f'\n>>> Time Elapsed : {time.time()-st_time:.1f} s.')
+    
+    # test loading pred data
+    print('\n\n<<< Testing pred data >>>')
+    dataloader, scaler, times = get_dataloader_cde_pred(args, data_path=args.data_path, normalizer='std', single=False, day_size=8, verbose=True, add_window=True)
+    batch = next(iter(dataloader))
+    *data_coeffs, target = batch
+    print('\n>>> dataloader:', len(dataloader), dataloader.__class__)
+    print(f'    batch: {[tsr.shape for tsr in batch]}')
     print('>>> scaler:', scaler.__class__)
-    print('>>> times:', times)
+    print('>>> times:', times.shape)
     print(f'\n>>> Time Elapsed : {time.time()-st_time:.1f} s.')
